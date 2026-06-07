@@ -218,7 +218,3 @@ The original BRFSS2015 dataset is always merged with uploaded data before retrai
 | Database | PostgreSQL 16 (Docker) |
 | Frontend | React 19, React Router 7, Vite 8, Tailwind CSS 4, Lucide Icons |
 | Data Source | CDC BRFSS 2015 Diabetes Health Indicators |
-
-## License
-
-MIT
