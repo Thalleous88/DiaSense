@@ -31,8 +31,8 @@ export function ResultPanel({ result }) {
           </h4>
           <p className="text-sm opacity-90 leading-relaxed mb-4">
             {flagged_for_review 
-              ? `The patient's risk score (${risk_score.toFixed(3)}) exceeds the clinical screening threshold of ${decision_threshold}. Follow-up HbA1c or FPG testing is advised.`
-              : `The patient's risk profile falls below the clinical screening threshold. Continue standard preventative care.`}
+              ? `The patient's risk score (${risk_score.toFixed(3)}) exceeds the clinical screening threshold of ${decision_threshold}. Follow-up HbA1c or fasting plasma glucose (FPG) testing is advised.`
+              : `The patient's risk profile falls below the clinical screening threshold. Continue routine preventive health monitoring and annual check-ups.`}
           </p>
           
           <div className="bg-white/60 rounded-lg p-3 text-sm">
@@ -43,14 +43,14 @@ export function ResultPanel({ result }) {
             <ul className="list-disc pl-5 space-y-1 opacity-90">
               {flagged_for_review ? (
                 <>
-                  <li>Schedule fasting plasma glucose (FPG) test</li>
-                  <li>Refer to lifestyle intervention program</li>
-                  <li>Discuss cardiovascular risk factors</li>
+                  <li>Schedule a fasting plasma glucose (FPG) test or HbA1c test</li>
+                  <li>Refer to a diabetes prevention lifestyle change program</li>
+                  <li>Review and address modifiable cardiovascular risk factors</li>
                 </>
               ) : (
                 <>
                   <li>Maintain current healthy lifestyle habits</li>
-                  <li>Re-assess in 12 months</li>
+                  <li>Re-assess with this screening tool in 12 months</li>
                 </>
               )}
             </ul>

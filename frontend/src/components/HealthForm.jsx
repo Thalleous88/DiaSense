@@ -17,26 +17,26 @@ export function HealthForm({ formData, setFormData, onSubmit, isLoading }) {
   };
 
   const binaryFields = [
-    { name: "HighBP", label: "High Blood Pressure" },
-    { name: "HighChol", label: "High Cholesterol" },
-    { name: "CholCheck", label: "Cholesterol Check (past 5 yrs)" },
-    { name: "Smoker", label: "Smoked 100+ cigarettes in life" },
-    { name: "Stroke", label: "History of Stroke" },
-    { name: "HeartDiseaseorAttack", label: "Heart Disease or Attack" },
-    { name: "PhysActivity", label: "Physical Activity (past 30 days)" },
-    { name: "Fruits", label: "Consume Fruit (1+ times/day)" },
-    { name: "Veggies", label: "Consume Veggies (1+ times/day)" },
-    { name: "HvyAlcoholConsump", label: "Heavy Alcohol Consumption" },
-    { name: "AnyHealthcare", label: "Has Healthcare Coverage" },
-    { name: "NoDocbcCost", label: "Avoided Doctor Due to Cost" },
-    { name: "DiffWalk", label: "Difficulty Walking/Climbing" },
+    { name: "HighBP", label: "Diagnosed with High Blood Pressure" },
+    { name: "HighChol", label: "Diagnosed with High Cholesterol" },
+    { name: "CholCheck", label: "Cholesterol Checked in Past 5 Years" },
+    { name: "Smoker", label: "Smoked at Least 100 Cigarettes in Lifetime" },
+    { name: "Stroke", label: "Ever Diagnosed with Stroke" },
+    { name: "HeartDiseaseorAttack", label: "Ever Diagnosed with Coronary Heart Disease or Myocardial Infarction" },
+    { name: "PhysActivity", label: "Physical Activity or Exercise in Past 30 Days (Outside Regular Job)" },
+    { name: "Fruits", label: "Consume Fruit at Least Once Per Day" },
+    { name: "Veggies", label: "Consume Vegetables at Least Once Per Day" },
+    { name: "HvyAlcoholConsump", label: "Heavy Alcohol Consumption (Men: >14 drinks/week; Women: >7 drinks/week)" },
+    { name: "AnyHealthcare", label: "Has Health Insurance or Healthcare Coverage" },
+    { name: "NoDocbcCost", label: "Could Not See Doctor in Past 12 Months Due to Cost" },
+    { name: "DiffWalk", label: "Serious Difficulty Walking or Climbing Stairs" },
   ];
 
   return (
     <div className="glass-card p-6">
       <div className="mb-6 pb-4 border-b border-slate-100">
         <h2 className="text-xl font-semibold text-slate-900">Patient Health Survey</h2>
-        <p className="text-sm text-slate-500 mt-1">Complete all 21 factors to generate a risk prediction score.</p>
+        <p className="text-sm text-slate-500 mt-1">Complete all fields to generate a diabetes risk prediction score.</p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-8">
@@ -109,7 +109,7 @@ export function HealthForm({ formData, setFormData, onSubmit, isLoading }) {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Poor Physical Health Days (past 30)</label>
+              <label className="text-sm font-medium text-slate-700">Days of Poor Physical Health (past 30 days)</label>
               <input 
                 type="number" name="PhysHlth" value={formData.PhysHlth} onChange={handleChange}
                 min="0" max="30" required
@@ -118,7 +118,7 @@ export function HealthForm({ formData, setFormData, onSubmit, isLoading }) {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Poor Mental Health Days (past 30)</label>
+              <label className="text-sm font-medium text-slate-700">Days of Poor Mental Health (past 30 days)</label>
               <input 
                 type="number" name="MentHlth" value={formData.MentHlth} onChange={handleChange}
                 min="0" max="30" required
@@ -132,15 +132,15 @@ export function HealthForm({ formData, setFormData, onSubmit, isLoading }) {
           <h3 className="text-sm font-semibold text-primary-600 uppercase tracking-wider mb-4">Risk Factors & Lifestyle</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6">
             {binaryFields.map(field => (
-              <label key={field.name} className="flex items-center space-x-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer">
+              <label key={field.name} className="flex items-start space-x-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer">
                 <input 
                   type="checkbox" 
                   name={field.name}
                   checked={formData[field.name] === 1}
                   onChange={handleChange}
-                  className="w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                  className="w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500 mt-0.5"
                 />
-                <span className="text-sm text-slate-700">{field.label}</span>
+                <span className="text-sm text-slate-700 leading-snug">{field.label}</span>
               </label>
             ))}
           </div>
