@@ -56,7 +56,7 @@ export function RiskGauge({ score = 0, level = "Low", percentage = 0 }) {
       </div>
       
       <p className="text-center mt-4 text-sm text-slate-600 max-w-[200px]">
-        Probability of developing diabetes or prediabetes based on 21 factors.
+        Estimated probability of diabetes or prediabetes based on the submitted health indicators.
       </p>
     </div>
   );
