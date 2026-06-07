@@ -34,3 +34,12 @@ coverage/
 
 .DS_Store
 Thumbs.db
+
+backend/uploads/
+backend/figures/
+backend/ensemble_model*.pkl
+backend/scaler*.pkl
+backend/model_meta*.pkl
+backend/xgb_diabetes_model*.pkl
+postgres_data/
+*.csv
