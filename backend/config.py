@@ -2,7 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://diasense:diasense@localhost:5433/diasense"
+    MLFLOW_TRACKING_URI: str = "localhost:5000" # for cloud
+    ALLOWED_ORIGINS: str = "*"
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
 

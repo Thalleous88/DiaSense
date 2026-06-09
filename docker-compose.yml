@@ -1,20 +1,40 @@
+version: '3.8'
+
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: diasense
-      POSTGRES_PASSWORD: diasense
-      POSTGRES_DB: diasense
-      POSTGRES_HOST_AUTH_METHOD: trust
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.2
+    container_name: diasense_mlflow
     ports:
-      - "5433:5432"
+      - "5000:5000"
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U diasense"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - mlflow_data:/mlflow
+
+  backend:
+    build: ./backend
+    container_name: diasense_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - ALLOWED_ORIGINS=*
+    depends_on:
+      - mlflow
+    volumes:
+      - ./backend/uploads:/app/uploads
+      
+  frontend:
+    build: ./frontend
+    container_name: diasense_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
 
 volumes:
-  postgres_data:
+  mlflow_data:

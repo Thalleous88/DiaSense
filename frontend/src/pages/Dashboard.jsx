@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Activity, Users, FileBarChart, Plus } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Plus } from 'lucide-react';
 import { RiskGauge } from '../components/RiskGauge';
-import { MetricCard } from '../components/MetricCard';
 import { HealthForm } from '../components/HealthForm';
 import { ResultPanel } from '../components/ResultPanel';
 import { FeatureBreakdown } from '../components/FeatureBreakdown';
-import { RecentAssessments } from '../components/RecentAssessments';
 import { apiFetch } from '../hooks/useApi';
 
 const initialState = {
@@ -20,16 +18,6 @@ export default function Dashboard() {
   const [formData, setFormData] = useState(initialState);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [stats, setStats] = useState(null);
-
-  const fetchStats = useCallback(async () => {
-    try {
-      const data = await apiFetch('/stats');
-      setStats(data);
-    } catch { }
-  }, []);
-
-  useEffect(() => { fetchStats(); }, [fetchStats]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,7 +29,6 @@ export default function Dashboard() {
         body: JSON.stringify(formData)
       });
       setResult(data);
-      fetchStats();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       alert("Error connecting to DiaSense API. Please check if the backend is running.");
@@ -63,16 +50,10 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Patient Assessment</h1>
           <p className="text-sm text-slate-500 mt-1">Generate real-time diabetes risk predictions using an ML ensemble.</p>
         </div>
-        <button onClick={handleNewPatient} className="hidden sm:flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm transition-colors font-medium text-sm">
+        {/* <button onClick={handleNewPatient} className="hidden sm:flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm transition-colors font-medium text-sm">
           <Plus className="w-4 h-4 mr-2" />
           New Patient
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        <MetricCard title="Total Screened" value={stats?.total_screened ?? "—"} subtitle={stats?.screened_subtitle ?? "Loading..."} icon={Users} trend="up" />
-        <MetricCard title="High Risk Flags" value={stats?.high_risk_count ?? "—"} subtitle={stats?.high_risk_subtitle ?? "Loading..."} icon={Activity} trend="neutral" />
-        <MetricCard title="Avg Prediction Time" value={stats?.avg_time ?? "—"} subtitle="Real-time inference" icon={FileBarChart} trend="down" />
+        </button> */}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -93,8 +74,7 @@ export default function Dashboard() {
               percentage={result?.risk_percentage || 0}
             />
             {result && <ResultPanel result={result} />}
-            <FeatureBreakdown />
-            <RecentAssessments />
+            {/* <FeatureBreakdown />} */}
           </div>
         </div>
       </div>
