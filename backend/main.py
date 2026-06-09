@@ -7,10 +7,6 @@ from datetime import datetime
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db, init_db
-from models import Assessment, TrainingRun, UploadedDataset
 from train_service import (
     load_active_model, get_active_model, get_training_status,
     validate_csv, start_background_training
@@ -34,7 +30,6 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
     load_active_model()
 
 
@@ -127,7 +122,7 @@ def _engineer_features_for_prediction(data: dict, meta: dict) -> pd.DataFrame:
 
 
 @app.post("/predict", response_model=PredictionResponse)
-async def predict(survey: PatientSurvey, db: AsyncSession = Depends(get_db)):
+async def predict(survey: PatientSurvey):
     model, scaler, meta = get_active_model()
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -160,18 +155,6 @@ async def predict(survey: PatientSurvey, db: AsyncSession = Depends(get_db)):
 
     patient_id = f"PAT-{uuid.uuid4().hex[:4].upper()}"
 
-    assessment = Assessment(
-        patient_id=patient_id,
-        input_data=data,
-        risk_score=round(risk_score, 4),
-        risk_percentage=risk_percentage,
-        risk_level=risk_level,
-        flagged_for_review=flagged,
-        decision_threshold=decision_threshold,
-    )
-    db.add(assessment)
-    await db.commit()
-
     return PredictionResponse(
         risk_score=round(risk_score, 4),
         risk_percentage=risk_percentage,
@@ -183,7 +166,7 @@ async def predict(survey: PatientSurvey, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/train/upload")
-async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def upload_csv(file: UploadFile = File(...)):
     try:
         if not file.filename.endswith(".csv"):
             raise HTTPException(status_code=400, detail="Only CSV files are accepted")
@@ -209,20 +192,9 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         if errs and not isinstance(errs, dict):
             errs = {"items": errs} if errs else None
 
-        uploaded = UploadedDataset(
-            filename=safe_name,
-            original_name=file.filename,
-            n_rows=validation["n_rows"],
-            n_valid_rows=validation.get("n_valid_rows", 0),
-            validation_errors=errs,
-        )
-        db.add(uploaded)
-        await db.commit()
-        await db.refresh(uploaded)
-
         return {
-            "upload_id": uploaded.id,
-            "filename": file.filename,
+            "filename_key": safe_name,
+            "original_filename": file.filename,
             "valid": validation["valid"],
             "n_rows": validation["n_rows"],
             "n_valid_rows": validation.get("n_valid_rows", 0),
@@ -237,40 +209,23 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
 
 
 @app.post("/train/start")
-async def start_training(upload_id: int, db: AsyncSession = Depends(get_db)):
+async def start_training(filename_key: str):
     status = get_training_status()
     if status["status"] == "running":
         raise HTTPException(status_code=409, detail="Training already in progress")
 
-    result = await db.execute(
-        text("SELECT * FROM uploaded_datasets WHERE id = :id"), {"id": upload_id}
-    )
-    row = result.mappings().first()
-    if not row:
-        raise HTTPException(status_code=404, detail="Upload not found")
-
     file_path = os.path.join(
-        os.path.dirname(__file__), settings.UPLOAD_DIR, row["filename"]
+        os.path.dirname(__file__), settings.UPLOAD_DIR, filename_key
     )
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Uploaded file not found on disk")
 
-    training_run = TrainingRun(
-        status="pending",
-        n_new_samples=row["n_valid_rows"],
-        started_at=datetime.utcnow(),
-    )
-    db.add(training_run)
-    await db.commit()
-    await db.refresh(training_run)
-
     try:
-        db_url = settings.DATABASE_URL
-        start_background_training(file_path, training_run.id, db_url)
+        start_background_training(file_path)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-    return {"training_run_id": training_run.id, "status": "started"}
+    return {"status": "started", "message": "Training job dispatched to background."}
 
 
 @app.get("/train/status")
@@ -278,32 +233,11 @@ async def training_status():
     return get_training_status()
 
 
+from train_service import get_training_history
+
 @app.get("/train/history")
-async def training_history(limit: int = Query(20, ge=1, le=100), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        text("SELECT * FROM training_runs ORDER BY created_at DESC LIMIT :lim"),
-        {"lim": limit}
-    )
-    runs = result.mappings().all()
-    return [
-        {
-            "id": r["id"],
-            "status": r["status"],
-            "n_new_samples": r["n_new_samples"],
-            "n_total_samples": r["n_total_samples"],
-            "roc_auc": r["roc_auc"],
-            "recall_class1": r["recall_class1"],
-            "pr_auc": r["pr_auc"],
-            "f1_score": r["f1_score"],
-            "decision_threshold": r["decision_threshold"],
-            "model_type": r["model_type"],
-            "error_message": r["error_message"],
-            "started_at": r["started_at"].isoformat() if r["started_at"] else None,
-            "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-        }
-        for r in runs
-    ]
+async def training_history(limit: int = Query(20, ge=1, le=100)):
+    return get_training_history(limit)
 
 
 @app.get("/feature-importance")
@@ -317,46 +251,7 @@ async def feature_importance():
     }
 
 
-@app.get("/stats")
-async def dashboard_stats(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(text("SELECT COUNT(*) as total FROM assessments"))
-    total = result.scalar() or 0
 
-    result = await db.execute(
-        text("SELECT COUNT(*) as flagged FROM assessments WHERE flagged_for_review = true")
-    )
-    high_risk = result.scalar() or 0
-
-    positivity = round((high_risk / total * 100), 1) if total > 0 else 0
-
-    return {
-        "total_screened": total,
-        "high_risk_count": high_risk,
-        "positivity_rate": f"{positivity}%",
-        "screened_subtitle": f"{total} assessments completed",
-        "high_risk_subtitle": f"{positivity}% positivity rate",
-        "avg_time": "< 150ms",
-    }
-
-
-@app.get("/assessments/recent")
-async def recent_assessments(limit: int = Query(5, ge=1, le=50), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        text("SELECT * FROM assessments ORDER BY created_at DESC LIMIT :lim"),
-        {"lim": limit}
-    )
-    rows = result.mappings().all()
-    return [
-        {
-            "patient_id": r["patient_id"],
-            "risk_score": r["risk_score"],
-            "risk_percentage": r["risk_percentage"],
-            "risk_level": r["risk_level"],
-            "flagged_for_review": r["flagged_for_review"],
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-        }
-        for r in rows
-    ]
 
 
 @app.get("/model/info")

@@ -8,13 +8,22 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     roc_auc_score, average_precision_score, recall_score, f1_score,
-    precision_recall_curve
+    precision_recall_curve, roc_curve
 )
 from sklearn.ensemble import StackingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from imblearn.over_sampling import SMOTE
+import mlflow
+import mlflow.sklearn
+from config import settings
+
+try:
+    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+    mlflow.set_experiment("DiaSense_Online_Learning")
+except Exception as e:
+    print(f"MLflow disabled: {e}")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -130,7 +139,7 @@ def _engineer_features(df):
     return df
 
 
-def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
+def _run_training(new_csv_path: str):
     global _active_model, _active_scaler, _active_meta, _training_status
 
     _training_status["status"] = "running"
@@ -139,10 +148,6 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
     _training_status["message"] = "Loading datasets..."
 
     try:
-        import sqlalchemy
-        from sqlalchemy import text
-        engine = sqlalchemy.create_engine(db_url.replace("+asyncpg", ""))
-
         original_path = os.path.join(BASE_DIR, "diabetes_binary_health_indicators_BRFSS2015.csv")
         df_original = pd.read_csv(original_path)
 
@@ -205,19 +210,19 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
         tuned_xgb = XGBClassifier(
             n_estimators=400, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, min_child_weight=3,
-            gamma=0.1, scale_pos_weight=3, eval_metric="logloss",
-            random_state=42, n_jobs=-1
+            gamma=0.1, eval_metric="logloss",
+            random_state=42, n_jobs=2
         )
 
         tuned_lgbm = LGBMClassifier(
             n_estimators=400, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, min_child_weight=3,
-            class_weight="balanced", random_state=42, n_jobs=-1, verbose=-1
+            random_state=42, n_jobs=2, verbose=-1
         )
 
         rf = RandomForestClassifier(
             n_estimators=400, max_depth=10, min_samples_split=5,
-            class_weight="balanced", random_state=42, n_jobs=-1
+            random_state=42, n_jobs=2
         )
 
         _training_status["progress"] = 70
@@ -232,7 +237,7 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
             final_estimator=LogisticRegression(max_iter=1000, random_state=42),
             cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
             passthrough=False,
-            n_jobs=-1,
+            n_jobs=2,
         )
 
         stacking_model.fit(X_train_res, y_train_res)
@@ -241,12 +246,22 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
         _training_status["message"] = "Evaluating model..."
 
         y_prob_val = stacking_model.predict_proba(X_val)[:, 1]
-        precision_arr, recall_arr, thresholds_arr = precision_recall_curve(y_val, y_prob_val)
-        j_scores = recall_arr[:-1] - (1 - precision_arr[:-1])
+
+        # Youden's J via ROC curve (correct formulation: J = TPR - FPR)
+        fpr_arr, tpr_arr, thresholds_roc = roc_curve(y_val, y_prob_val)
+        j_scores = tpr_arr - fpr_arr
         best_youden_idx = np.argmax(j_scores)
-        decision_threshold = float(thresholds_arr[best_youden_idx])
-        if decision_threshold < 0.20:
-            decision_threshold = 0.15
+        youden_threshold = float(thresholds_roc[best_youden_idx])
+
+        # Clinical recall enforcement (>= 0.70)
+        TARGET_RECALL = 0.70
+        precision_arr, recall_arr, thresholds_arr = precision_recall_curve(y_val, y_prob_val)
+        valid_indices = np.where(recall_arr >= TARGET_RECALL)[0]
+        if len(valid_indices) > 0:
+            best_clinical_idx = valid_indices[np.argmax(precision_arr[valid_indices])]
+            decision_threshold = float(thresholds_arr[min(best_clinical_idx, len(thresholds_arr) - 1)])
+        else:
+            decision_threshold = youden_threshold
 
         y_prob_test = stacking_model.predict_proba(X_test)[:, 1]
         y_pred_test = (y_prob_test >= decision_threshold).astype(int)
@@ -272,7 +287,7 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
         except Exception:
             rf_standalone = RandomForestClassifier(
                 n_estimators=200, max_depth=10,
-                class_weight="balanced", random_state=42, n_jobs=-1
+                random_state=42, n_jobs=2
             )
             rf_standalone.fit(X_train_res, y_train_res)
             explainer = shap.TreeExplainer(rf_standalone)
@@ -329,30 +344,17 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
         _active_scaler = scaler
         _active_meta = meta
 
-        with engine.begin() as conn:
-            conn.execute(text("""
-                UPDATE training_runs
-                SET status = 'completed',
-                    n_new_samples = :n_new,
-                    n_total_samples = :n_total,
-                    roc_auc = :roc_auc,
-                    recall_class1 = :recall1,
-                    pr_auc = :pr_auc,
-                    f1_score = :f1,
-                    decision_threshold = :thr,
-                    model_type = 'StackingClassifier',
-                    completed_at = NOW()
-                WHERE id = :rid
-            """), {
-                "n_new": n_new_samples,
-                "n_total": n_total_samples,
-                "roc_auc": test_roc_auc,
-                "recall1": test_recall1,
-                "pr_auc": test_pr_auc,
-                "f1": test_f1,
-                "thr": decision_threshold,
-                "rid": training_run_id,
-            })
+        with mlflow.start_run() as run:
+            mlflow.log_param("model_type", "StackingClassifier")
+            mlflow.log_param("decision_threshold", decision_threshold)
+            mlflow.log_metric("n_new_samples", n_new_samples)
+            mlflow.log_metric("n_total_samples", n_total_samples)
+            mlflow.log_metric("roc_auc", test_roc_auc)
+            mlflow.log_metric("recall_class1", test_recall1)
+            mlflow.log_metric("pr_auc", test_pr_auc)
+            mlflow.log_metric("f1_score", test_f1)
+            
+            mlflow.sklearn.log_model(stacking_model, "model")
 
         _training_status["status"] = "completed"
         _training_status["progress"] = 100
@@ -364,28 +366,40 @@ def _run_training(new_csv_path: str, training_run_id: int, db_url: str):
     except Exception as e:
         _training_status["status"] = "failed"
         _training_status["message"] = str(e)
+        
+def get_training_history(limit=20):
+    try:
+        runs = mlflow.search_runs(max_results=limit, order_by=["start_time DESC"])
+        if len(runs) == 0:
+            return []
+        history = []
+        for _, row in runs.iterrows():
+            history.append({
+                "id": row.get("run_id"),
+                "status": "completed" if row.get("status") == "FINISHED" else row.get("status"),
+                "n_new_samples": row.get("metrics.n_new_samples", 0),
+                "n_total_samples": row.get("metrics.n_total_samples", 0),
+                "roc_auc": row.get("metrics.roc_auc", 0),
+                "recall_class1": row.get("metrics.recall_class1", 0),
+                "pr_auc": row.get("metrics.pr_auc", 0),
+                "f1_score": row.get("metrics.f1_score", 0),
+                "decision_threshold": row.get("params.decision_threshold", 0),
+                "model_type": row.get("params.model_type", "Unknown"),
+                "started_at": str(row.get("start_time")),
+                "completed_at": str(row.get("end_time")),
+            })
+        return history
+    except Exception:
+        return []
 
-        try:
-            import sqlalchemy
-            from sqlalchemy import text
-            eng = sqlalchemy.create_engine(db_url.replace("+asyncpg", ""))
-            with eng.begin() as conn:
-                conn.execute(text("""
-                    UPDATE training_runs
-                    SET status = 'failed', error_message = :err, completed_at = NOW()
-                    WHERE id = :rid
-                """), {"err": str(e), "rid": training_run_id})
-        except Exception:
-            pass
 
-
-def start_background_training(new_csv_path: str, training_run_id: int, db_url: str):
+def start_background_training(new_csv_path: str):
     if _training_status["status"] == "running":
         raise RuntimeError("Training already in progress")
 
     thread = threading.Thread(
         target=_run_training,
-        args=(new_csv_path, training_run_id, db_url),
+        args=(new_csv_path,),
         daemon=True
     )
     thread.start()

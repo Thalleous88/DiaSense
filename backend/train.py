@@ -107,7 +107,7 @@ plt.tight_layout()
 plt.savefig(os.path.join(FIGURES_DIR, "02_continuous_distributions.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
-fig, axes = plt.subplots(5, 3, figsize=(18, 22))
+fig, axes = plt.subplots(4, 4, figsize=(20, 24))
 axes = axes.flatten()
 for i, col in enumerate(BINARY_COLS):
     ct = pd.crosstab(df[col], df["Diabetes_binary"], normalize="index")
@@ -120,7 +120,8 @@ if len(BINARY_COLS) < len(axes):
     for j in range(len(BINARY_COLS), len(axes)):
         axes[j].set_visible(False)
 plt.suptitle("Binary Feature Distributions by Diabetes Status", fontsize=16, fontweight="bold", y=1.01)
-plt.tight_layout()
+plt.tight_layout(pad=3.0)
+sns.despine()
 plt.savefig(os.path.join(FIGURES_DIR, "03_binary_distributions.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
@@ -171,7 +172,7 @@ plt.tight_layout()
 plt.savefig(os.path.join(FIGURES_DIR, "07_boxplots_continuous.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
-fig, axes = plt.subplots(5, 3, figsize=(18, 22))
+fig, axes = plt.subplots(4, 4, figsize=(20, 24))
 axes = axes.flatten()
 for i, col in enumerate(BINARY_COLS):
     prev = df.groupby(col)["Diabetes_binary"].mean() * 100
@@ -185,7 +186,8 @@ if len(BINARY_COLS) < len(axes):
     for j in range(len(BINARY_COLS), len(axes)):
         axes[j].set_visible(False)
 plt.suptitle("Diabetes Prevalence by Binary Features", fontsize=16, fontweight="bold", y=1.01)
-plt.tight_layout()
+plt.tight_layout(pad=3.0)
+sns.despine()
 plt.savefig(os.path.join(FIGURES_DIR, "08_prevalence_binary.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
@@ -291,23 +293,27 @@ print(f"    After SMOTE:  Class 0={int((y_train_res==0).sum()):,}, Class 1={int(
 # =============================================================================
 print("\n[6] Training base models...")
 
+# NOTE: class_weight and scale_pos_weight are intentionally omitted.
+# SMOTE has already balanced the training set to a 1:1 ratio, so adding
+# model-level class reweighting on top would double-correct and distort
+# probability calibration.
 base_models = {
     "XGBoost": XGBClassifier(
         n_estimators=400, max_depth=5, learning_rate=0.05, subsample=0.8,
-        colsample_bytree=0.8, min_child_weight=3, gamma=0.1, scale_pos_weight=3,
+        colsample_bytree=0.8, min_child_weight=3, gamma=0.1,
         eval_metric="logloss", random_state=42, n_jobs=-1
     ),
     "LightGBM": LGBMClassifier(
         n_estimators=400, max_depth=5, learning_rate=0.05, subsample=0.8,
-        colsample_bytree=0.8, min_child_weight=3, class_weight="balanced",
+        colsample_bytree=0.8, min_child_weight=3,
         random_state=42, n_jobs=-1, verbose=-1
     ),
     "RandomForest": RandomForestClassifier(
         n_estimators=400, max_depth=10, min_samples_split=5,
-        class_weight="balanced", random_state=42, n_jobs=-1
+        random_state=42, n_jobs=-1
     ),
     "LogisticRegression": LogisticRegression(
-        max_iter=1000, class_weight="balanced", random_state=42, n_jobs=-1
+        max_iter=1000, random_state=42, n_jobs=-1
     ),
 }
 
@@ -333,11 +339,26 @@ print("  " + "-" * 56)
 for name, r in base_results.items():
     print(f"  {name:<20} {r['roc_auc']:>8.4f} {r['pr_auc']:>8.4f} {r['f1']:>8.4f} {r['recall1']:>10.4f}")
 
+print("\n  Visualizing Model Performance Metrics...")
+metrics_df = pd.DataFrame.from_dict({k: {"ROC-AUC": v["roc_auc"], "PR-AUC": v["pr_auc"], "F1": v["f1"], "Recall(1)": v["recall1"]} for k,v in base_results.items()}, orient="index")
+fig, ax = plt.subplots(figsize=(12, 6))
+metrics_df.plot(kind="bar", ax=ax, width=0.8, colormap="viridis")
+ax.set_title("Base Model Performance Comparison", fontsize=15, fontweight="bold")
+ax.set_ylabel("Score")
+ax.set_ylim(0, 1.0)
+plt.xticks(rotation=0, fontsize=11)
+plt.legend(loc="lower right", bbox_to_anchor=(1.15, 0))
+plt.tight_layout(pad=2.0)
+sns.despine()
+plt.savefig(os.path.join(FIGURES_DIR, "08b_base_model_metrics.png"), dpi=150, bbox_inches="tight")
+plt.close()
+
 # =============================================================================
 # CELL 8 — Hyperparameter Tuning (Optuna)
 # =============================================================================
 print("\n[7] Hyperparameter tuning with Optuna...")
 import optuna
+from sklearn.metrics import fbeta_score
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 def xgb_objective(trial):
@@ -351,7 +372,6 @@ def xgb_objective(trial):
         "gamma": trial.suggest_float("gamma", 0.0, 0.3),
         "reg_alpha": trial.suggest_float("reg_alpha", 0.0, 1.0),
         "reg_lambda": trial.suggest_float("reg_lambda", 0.0, 1.0),
-        "scale_pos_weight": 3,
         "eval_metric": "logloss",
         "random_state": 42,
         "n_jobs": -1,
@@ -359,7 +379,8 @@ def xgb_objective(trial):
     m = XGBClassifier(**params)
     m.fit(X_train_res, y_train_res, verbose=False)
     y_prob = m.predict_proba(X_val)[:, 1]
-    return roc_auc_score(y_val, y_prob)
+    y_pred = (y_prob >= 0.5).astype(int)
+    return fbeta_score(y_val, y_pred, beta=2)
 
 def lgbm_objective(trial):
     params = {
@@ -371,7 +392,6 @@ def lgbm_objective(trial):
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 7),
         "reg_alpha": trial.suggest_float("reg_alpha", 0.0, 1.0),
         "reg_lambda": trial.suggest_float("reg_lambda", 0.0, 1.0),
-        "class_weight": "balanced",
         "random_state": 42,
         "n_jobs": -1,
         "verbose": -1,
@@ -379,27 +399,28 @@ def lgbm_objective(trial):
     m = LGBMClassifier(**params)
     m.fit(X_train_res, y_train_res)
     y_prob = m.predict_proba(X_val)[:, 1]
-    return roc_auc_score(y_val, y_prob)
+    y_pred = (y_prob >= 0.5).astype(int)
+    return fbeta_score(y_val, y_pred, beta=2)
 
-print("  Tuning XGBoost (20 trials)...")
+print("  Tuning XGBoost (20 trials, F2 objective)...")
 xgb_study = optuna.create_study(direction="maximize")
 xgb_study.optimize(xgb_objective, n_trials=20, show_progress_bar=False)
-print(f"    Best XGBoost ROC-AUC: {xgb_study.best_value:.4f}")
+print(f"    Best XGBoost F2: {xgb_study.best_value:.4f}")
 print(f"    Best params: {xgb_study.best_params}")
 
-print("  Tuning LightGBM (20 trials)...")
+print("  Tuning LightGBM (20 trials, F2 objective)...")
 lgbm_study = optuna.create_study(direction="maximize")
 lgbm_study.optimize(lgbm_objective, n_trials=20, show_progress_bar=False)
-print(f"    Best LightGBM ROC-AUC: {lgbm_study.best_value:.4f}")
+print(f"    Best LightGBM F2: {lgbm_study.best_value:.4f}")
 print(f"    Best params: {lgbm_study.best_params}")
 
 tuned_xgb = XGBClassifier(
     **xgb_study.best_params,
-    scale_pos_weight=3, eval_metric="logloss", random_state=42, n_jobs=-1
+    eval_metric="logloss", random_state=42, n_jobs=-1
 )
 tuned_lgbm = LGBMClassifier(
     **lgbm_study.best_params,
-    class_weight="balanced", random_state=42, n_jobs=-1, verbose=-1
+    random_state=42, n_jobs=-1, verbose=-1
 )
 
 # =============================================================================
@@ -434,23 +455,26 @@ print(f"  Ensemble Val PR-AUC:  {pr_auc_ensemble:.4f}")
 # =============================================================================
 print("\n[9] Optimizing decision threshold...")
 
-precision_arr, recall_arr, thresholds_arr = precision_recall_curve(y_val, y_prob_ensemble)
-f1_arr = 2 * precision_arr * recall_arr / (precision_arr + recall_arr + 1e-8)
-best_f1_idx = np.argmax(f1_arr)
-best_f1_threshold = thresholds_arr[best_f1_idx]
-
-j_scores = recall_arr[:-1] - (1 - precision_arr[:-1])
+# --- Method 1: Youden's J via ROC curve (correct formulation) ---
+fpr_arr, tpr_arr, thresholds_roc = roc_curve(y_val, y_prob_ensemble)
+j_scores = tpr_arr - fpr_arr
 best_youden_idx = np.argmax(j_scores)
-youden_threshold = thresholds_arr[best_youden_idx]
+youden_threshold = float(thresholds_roc[best_youden_idx])
+print(f"  Youden J threshold (ROC-based): {youden_threshold:.4f}")
 
-print(f"  Best F1 threshold: {best_f1_threshold:.4f} (F1={f1_arr[best_f1_idx]:.4f})")
-print(f"  Youden J threshold: {youden_threshold:.4f}")
+# --- Method 2: Clinical recall enforcement (>= 0.70) ---
+TARGET_RECALL = 0.70
+precision_arr, recall_arr, thresholds_arr = precision_recall_curve(y_val, y_prob_ensemble)
+valid_indices = np.where(recall_arr >= TARGET_RECALL)[0]
+if len(valid_indices) > 0:
+    best_clinical_idx = valid_indices[np.argmax(precision_arr[valid_indices])]
+    clinical_threshold = float(thresholds_arr[min(best_clinical_idx, len(thresholds_arr) - 1)])
+else:
+    clinical_threshold = youden_threshold
+print(f"  Clinical threshold (Recall >= {TARGET_RECALL}): {clinical_threshold:.4f}")
 
-DECISION_THRESHOLD = youden_threshold
-if DECISION_THRESHOLD < 0.20:
-    DECISION_THRESHOLD = 0.30
-    print(f"  Clamped threshold to {DECISION_THRESHOLD:.2f} (clinical minimum)")
-
+# Select the threshold that satisfies the clinical recall constraint
+DECISION_THRESHOLD = clinical_threshold
 print(f"\n  Final Decision Threshold: {DECISION_THRESHOLD:.4f}")
 
 print("\n[10] Final evaluation on TEST set...")

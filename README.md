@@ -1,6 +1,6 @@
 # DiaSense
 
-AI-powered diabetes risk prediction system with an ensemble ML model, real-time FastAPI backend, and React frontend.
+AI-powered diabetes risk prediction system with an ensemble ML model, real-time FastAPI backend, and React frontend. Designed for high availability, scalability, and stateless execution via Docker.
 
 ## Architecture
 
@@ -8,14 +8,12 @@ AI-powered diabetes risk prediction system with an ensemble ML model, real-time 
 DiaSense/
 ├── backend/                  # FastAPI + ML pipeline
 │   ├── main.py               # API endpoints
-│   ├── train.py              # Full ML pipeline (EDA, training, SHAP)
+│   ├── train.py              # Full offline ML pipeline (EDA, training, SHAP)
 │   ├── train_service.py      # Background training + model hot-swap
-│   ├── config.py             # Pydantic settings (from .env)
-│   ├── database.py           # Async SQLAlchemy engine + sessions
-│   ├── models.py             # ORM models (Assessment, TrainingRun, UploadedDataset)
+│   ├── config.py             # Pydantic settings
 │   ├── requirements.txt      # Python dependencies
-│   ├── .env                  # Environment variables (not committed)
-│   ├── figures/              # EDA visualizations (15 PNGs, generated)
+│   ├── Dockerfile            # Uvicorn FastAPI Server
+│   ├── figures/              # EDA visualizations (generated)
 │   └── uploads/              # Uploaded CSV datasets (generated)
 ├── frontend/                 # React + Vite + Tailwind
 │   ├── src/
@@ -29,18 +27,17 @@ DiaSense/
 │   │   │   ├── RiskGauge.jsx          # Animated risk gauge
 │   │   │   ├── ResultPanel.jsx        # Risk level + recommendations
 │   │   │   ├── FeatureBreakdown.jsx   # SHAP feature importance
-│   │   │   ├── RecentAssessments.jsx  # Latest predictions
-│   │   │   ├── MetricCard.jsx        # Stats metric cards
 │   │   │   ├── UploadArea.jsx        # Drag-and-drop CSV upload
 │   │   │   ├── TrainingStatus.jsx    # Real-time training progress
 │   │   │   ├── TrainingHistory.jsx   # Past training runs table
 │   │   │   └── ModelInfo.jsx         # Current model metrics
 │   │   ├── hooks/
-│   │   │   └── useApi.js             # API fetch wrapper (/api proxy)
+│   │   │   └── useApi.js             # API fetch wrapper
 │   │   └── lib/
 │   │       └── utils.js              # cn() utility
-│   └── vite.config.js        # Dev server with /api proxy
-└── docker-compose.yml        # PostgreSQL 16 service
+│   ├── Dockerfile            # Nginx Multi-stage build
+│   └── nginx.conf            # Nginx config and /api proxy
+└── docker-compose.yml        # Orchestrates Frontend, Backend, and MLflow
 ```
 
 ## ML Pipeline
@@ -62,7 +59,7 @@ The model is a **StackingClassifier** with three base learners and a logistic re
 - SMOTE oversampling on training set (40/60 train-temp split, then 50/50 val-test)
 - Decision threshold optimized to **0.15** for clinical recall >= 0.70
 
-### Performance
+### Performance (Baseline)
 
 | Metric | Value |
 |--------|-------|
@@ -73,7 +70,7 @@ The model is a **StackingClassifier** with three base learners and a logistic re
 
 ### SHAP Explainability
 
-Feature importance is computed using SHAP TreeExplainer on the RandomForest base model within the ensemble, evaluated on a 200-row validation sample.
+Feature importance is computed using SHAP TreeExplainer on the RandomForest base model within the ensemble, evaluated on a validation sample.
 
 ## API Endpoints
 
@@ -82,14 +79,12 @@ Feature importance is computed using SHAP TreeExplainer on the RandomForest base
 | `GET` | `/` | Service info |
 | `GET` | `/health` | Health check + model status |
 | `POST` | `/predict` | Generate diabetes risk prediction |
-| `GET` | `/stats` | Screening statistics |
 | `GET` | `/feature-importance` | SHAP feature importance |
 | `GET` | `/model/info` | Current model metrics and metadata |
-| `GET` | `/assessments/recent` | Recent risk assessments |
 | `POST` | `/train/upload` | Upload CSV dataset for training |
 | `POST` | `/train/start` | Start background model training |
 | `GET` | `/train/status` | Current training progress |
-| `GET` | `/train/history` | Past training runs |
+| `GET` | `/train/history` | Past training runs (fetched from MLflow) |
 
 ### Predict Request
 
@@ -136,76 +131,47 @@ Feature importance is computed using SHAP TreeExplainer on the RandomForest base
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 18+
 - Docker & Docker Compose
 
-### 1. Start PostgreSQL
+### 1. Build and Run the Stack
+
+Run the following command in the root directory to spin up the entire application stack:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-This starts PostgreSQL 16 on port **5433** (to avoid conflicts with local PG installations).
+This starts three services:
+- **MLflow Tracking Server**: `http://localhost:5000`
+- **FastAPI Backend**: `http://localhost:8000`
+- **React Frontend**: `http://localhost:80`
 
-### 2. Backend Setup
+### 2. Initial Model Generation
+
+If you have never trained the model before, you need to execute the initial ML pipeline.
 
 ```bash
 cd backend
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # Linux/macOS
-
 pip install -r requirements.txt
-```
 
-Create a `.env` file in `backend/`:
-
-```
-DATABASE_URL=postgresql+asyncpg://diasense:diasense@localhost:5433/diasense
-```
-
-Run the ML pipeline to generate model artifacts:
-
-```bash
 python train.py
 ```
 
-This produces:
-- `ensemble_model.pkl` — trained stacking ensemble
-- `scaler.pkl` — fitted StandardScaler
-- `model_meta.pkl` — threshold, metrics, feature lists
-- `figures/` — 15 EDA visualizations
+This script will generate your local EDA visualizations (`figures/`) and create the base model artifacts: `ensemble_model.pkl`, `scaler.pkl`, and `model_meta.pkl`.
 
-Start the API server:
+## Model Hot-Swap & Online Learning
 
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-### 3. Frontend Setup
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The Vite dev server runs on `http://localhost:5173` and proxies `/api/*` requests to the backend at `http://localhost:8000`.
-
-### 4. Access the App
-
-Open `http://localhost:5173` in your browser.
-
-## Model Hot-Swap
-
-When new training is triggered via the Training page:
+When new training is triggered via the frontend Training page:
 
 1. User uploads a CSV via `POST /train/upload`
 2. User clicks "Start Training" → `POST /train/start`
-3. Training runs in a **background thread** — predictions continue using the current model
-4. On completion, the new model, scaler, and metadata are **atomically swapped** into memory
-5. Subsequent predictions use the new model immediately
+3. Training runs in a **background thread** (capped at `n_jobs=2` to prevent API starvation).
+4. All run parameters and performance metrics are logged to the localized MLflow server.
+5. On completion, the new model, scaler, and metadata are **atomically swapped** into the live API memory.
+6. Subsequent predictions use the new model immediately without requiring an API restart.
 
 The original BRFSS2015 dataset is always merged with uploaded data before retraining to prevent catastrophic forgetting.
 
@@ -214,11 +180,7 @@ The original BRFSS2015 dataset is always merged with uploaded data before retrai
 | Layer | Technology |
 |-------|-----------|
 | ML | scikit-learn, XGBoost, LightGBM, SHAP, Optuna, imbalanced-learn |
-| Backend | FastAPI, SQLAlchemy (async), asyncpg, Pydantic |
-| Database | PostgreSQL 16 (Docker) |
+| Backend | FastAPI, Pydantic, MLflow |
+| Infrastructure | Docker, Docker Compose, Nginx |
 | Frontend | React 19, React Router 7, Vite 8, Tailwind CSS 4, Lucide Icons |
 | Data Source | CDC BRFSS 2015 Diabetes Health Indicators |
-
-## License
-
-MIT

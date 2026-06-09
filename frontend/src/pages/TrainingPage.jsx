@@ -59,9 +59,9 @@ export default function TrainingPage() {
   };
 
   const handleStartTraining = async () => {
-    if (!uploadResult?.upload_id) return;
+    if (!uploadResult?.filename_key) return;
     try {
-      await apiFetch(`/train/start?upload_id=${uploadResult.upload_id}`, { method: 'POST' });
+      await apiFetch(`/train/start?filename_key=${uploadResult.filename_key}`, { method: 'POST' });
       setIsTraining(true);
       setUploadResult(null);
       fetchTrainingStatus();
