@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    MLFLOW_TRACKING_URI: str = "file:./mlruns" #localhost:5000 for cloud
+    MLFLOW_TRACKING_URI: str = "localhost:5000" # for cloud
     ALLOWED_ORIGINS: str = "*"
     UPLOAD_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 50
