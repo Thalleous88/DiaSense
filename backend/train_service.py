@@ -211,18 +211,18 @@ def _run_training(new_csv_path: str):
             n_estimators=400, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, min_child_weight=3,
             gamma=0.1, eval_metric="logloss",
-            random_state=42, n_jobs=2
+            random_state=42, n_jobs=1
         )
 
         tuned_lgbm = LGBMClassifier(
             n_estimators=400, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, min_child_weight=3,
-            random_state=42, n_jobs=2, verbose=-1
+            random_state=42, n_jobs=1, verbose=-1
         )
 
         rf = RandomForestClassifier(
             n_estimators=400, max_depth=10, min_samples_split=5,
-            random_state=42, n_jobs=2
+            random_state=42, n_jobs=1
         )
 
         _training_status["progress"] = 70
@@ -237,7 +237,7 @@ def _run_training(new_csv_path: str):
             final_estimator=LogisticRegression(max_iter=1000, random_state=42),
             cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
             passthrough=False,
-            n_jobs=2,
+            n_jobs=1,
         )
 
         stacking_model.fit(X_train_res, y_train_res)
@@ -287,7 +287,7 @@ def _run_training(new_csv_path: str):
         except Exception:
             rf_standalone = RandomForestClassifier(
                 n_estimators=200, max_depth=10,
-                random_state=42, n_jobs=2
+                random_state=42, n_jobs=1
             )
             rf_standalone.fit(X_train_res, y_train_res)
             explainer = shap.TreeExplainer(rf_standalone)
