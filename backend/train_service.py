@@ -353,8 +353,18 @@ def _run_training(new_csv_path: str):
             mlflow.log_metric("recall_class1", test_recall1)
             mlflow.log_metric("pr_auc", test_pr_auc)
             mlflow.log_metric("f1_score", test_f1)
-            
-            mlflow.sklearn.log_model(stacking_model, "model")
+
+            trusted_packages = [
+                'collections.OrderedDict',
+                'lightgbm.basic.Booster',
+                'lightgbm.sklearn.LGBMClassifier',
+                'sklearn.model_selection._split.StratifiedKFold',
+                'sklearn.utils._bunch.Bunch',
+                'xgboost.core.Booster',
+                'xgboost.sklearn.XGBClassifier'
+            ]
+
+            mlflow.sklearn.log_model(stacking_model, "model", skops_trusted_types=trusted_packages)
 
         _training_status["status"] = "completed"
         _training_status["progress"] = 100

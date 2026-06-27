@@ -1,33 +1,58 @@
 version: '3.8'
 
+
+
 services:
+
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.10.2
+
+    image: ghcr.io/mlflow/mlflow:latest
+
     container_name: diasense_mlflow
+
     ports:
+
       - "5000:5000"
+
     command: >
+
       mlflow server
+
       --host 0.0.0.0
       --port 5000
       --backend-store-uri sqlite:////mlflow/mlflow.db
       --default-artifact-root /mlflow/artifacts
-    volumes:
-      - mlflow_data:/mlflow
+      --disable-security-middleware
+
+    environment:
+      - SKOPS_TRUST_ALL_TYPES=True
 
   backend:
+
     build: ./backend
+
     container_name: diasense_backend
+
     ports:
+
       - "8000:8000"
+
     environment:
+
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+
       - ALLOWED_ORIGINS=*
+
+      - GIT_PYTHON_REFRESH=quiet
+
     depends_on:
+
       - mlflow
+
     volumes:
+
       - ./backend/uploads:/app/uploads
-      
+
   frontend:
     build: ./frontend
     container_name: diasense_frontend
