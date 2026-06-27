@@ -53,9 +53,6 @@ print("=" * 70)
 print("DiaSense - Full ML Pipeline: EDA > Preprocessing > Ensemble > SHAP")
 print("=" * 70)
 
-# =============================================================================
-# CELL 2 — Load Data & Overview
-# =============================================================================
 print("\n[1] Loading dataset...")
 df = pd.read_csv(DATA_PATH)
 print(f"Shape: {df.shape}")
@@ -70,9 +67,6 @@ print(f"  Imbalance ratio: {target_counts[0]/target_counts[1]:.2f}:1")
 
 print(f"\nDescriptive statistics:\n{df.describe().to_string()}")
 
-# =============================================================================
-# CELL 3 — EDA: Target & Feature Distributions
-# =============================================================================
 print("\n[2] Generating EDA visualizations...")
 
 fig, ax = plt.subplots(1, 2, figsize=(12, 5))
@@ -138,9 +132,6 @@ plt.tight_layout()
 plt.savefig(os.path.join(FIGURES_DIR, "04_ordinal_distributions.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
-# =============================================================================
-# CELL 4 — EDA: Correlation & Relationships
-# =============================================================================
 print("[3] Generating correlation and relationship plots...")
 
 corr = df.corr()
@@ -215,9 +206,6 @@ plt.close()
 
 print(f"  Saved 9 EDA figures to {FIGURES_DIR}/")
 
-# =============================================================================
-# CELL 5 — Preprocessing
-# =============================================================================
 print("\n[4] Preprocessing...")
 
 for col in BINARY_COLS + ORDINAL_COLS:
@@ -259,9 +247,6 @@ print(f"  Engineered features: {len(ENGINEERED_COLS)}")
 print(f"  Total features: {len(ALL_FEATURE_COLS)}")
 print(f"  Final dataset shape: {df.shape}")
 
-# =============================================================================
-# CELL 6 — Train/Val/Test Split + Scaling + Resampling
-# =============================================================================
 print("\n[5] Splitting data and applying transformations...")
 
 X = df[ALL_FEATURE_COLS]
@@ -288,15 +273,8 @@ smote = SMOTE(random_state=42)
 X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
 print(f"    After SMOTE:  Class 0={int((y_train_res==0).sum()):,}, Class 1={int((y_train_res==1).sum()):,}")
 
-# =============================================================================
-# CELL 7 — Base Model Training
-# =============================================================================
 print("\n[6] Training base models...")
 
-# NOTE: class_weight and scale_pos_weight are intentionally omitted.
-# SMOTE has already balanced the training set to a 1:1 ratio, so adding
-# model-level class reweighting on top would double-correct and distort
-# probability calibration.
 base_models = {
     "XGBoost": XGBClassifier(
         n_estimators=400, max_depth=5, learning_rate=0.05, subsample=0.8,
@@ -353,9 +331,6 @@ sns.despine()
 plt.savefig(os.path.join(FIGURES_DIR, "08b_base_model_metrics.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
-# =============================================================================
-# CELL 8 — Hyperparameter Tuning (Optuna)
-# =============================================================================
 print("\n[7] Hyperparameter tuning with Optuna...")
 import optuna
 from sklearn.metrics import fbeta_score
@@ -423,9 +398,6 @@ tuned_lgbm = LGBMClassifier(
     random_state=42, n_jobs=-1, verbose=-1
 )
 
-# =============================================================================
-# CELL 9 — Stacking Ensemble
-# =============================================================================
 print("\n[8] Building stacking ensemble...")
 
 stacking_model = StackingClassifier(
@@ -450,19 +422,14 @@ pr_auc_ensemble = average_precision_score(y_val, y_prob_ensemble)
 print(f"  Ensemble Val ROC-AUC: {roc_auc_ensemble:.4f}")
 print(f"  Ensemble Val PR-AUC:  {pr_auc_ensemble:.4f}")
 
-# =============================================================================
-# CELL 10 — Threshold Optimization & Final Evaluation
-# =============================================================================
 print("\n[9] Optimizing decision threshold...")
 
-# --- Method 1: Youden's J via ROC curve (correct formulation) ---
 fpr_arr, tpr_arr, thresholds_roc = roc_curve(y_val, y_prob_ensemble)
 j_scores = tpr_arr - fpr_arr
 best_youden_idx = np.argmax(j_scores)
 youden_threshold = float(thresholds_roc[best_youden_idx])
 print(f"  Youden J threshold (ROC-based): {youden_threshold:.4f}")
 
-# --- Method 2: Clinical recall enforcement (>= 0.70) ---
 TARGET_RECALL = 0.70
 precision_arr, recall_arr, thresholds_arr = precision_recall_curve(y_val, y_prob_ensemble)
 valid_indices = np.where(recall_arr >= TARGET_RECALL)[0]
@@ -473,7 +440,6 @@ else:
     clinical_threshold = youden_threshold
 print(f"  Clinical threshold (Recall >= {TARGET_RECALL}): {clinical_threshold:.4f}")
 
-# Select the threshold that satisfies the clinical recall constraint
 DECISION_THRESHOLD = clinical_threshold
 print(f"\n  Final Decision Threshold: {DECISION_THRESHOLD:.4f}")
 
@@ -557,9 +523,6 @@ plt.tight_layout()
 plt.savefig(os.path.join(FIGURES_DIR, "13_calibration_curve.png"), dpi=150, bbox_inches="tight")
 plt.close()
 
-# =============================================================================
-# CELL 11 — SHAP Explainability
-# =============================================================================
 print("\n[11] Computing SHAP values...")
 
 rf_for_shap = base_models["RandomForest"]
@@ -567,9 +530,9 @@ rf_for_shap.fit(X_train_res, y_train_res)
 
 X_val_sample = X_val.iloc[:500]
 explainer = shap.TreeExplainer(rf_for_shap)
-shap_values = explainer.shap_values(X_val_sample)
+explanation = explainer(X_val_sample)
 
-sv = shap_values[1] if isinstance(shap_values, list) else shap_values
+sv = explanation.values[:, :, 1]
 
 fig, ax = plt.subplots(figsize=(12, 8))
 shap.summary_plot(sv, X_val_sample, show=False, max_display=20)
@@ -586,8 +549,6 @@ plt.savefig(os.path.join(FIGURES_DIR, "15_shap_importance.png"), dpi=150, bbox_i
 plt.close()
 
 mean_abs_shap = np.abs(sv).mean(axis=0)
-if mean_abs_shap.ndim > 1:
-    mean_abs_shap = mean_abs_shap.mean(axis=1)
 
 feature_importance = {}
 for i, col in enumerate(ALL_FEATURE_COLS):
@@ -601,9 +562,6 @@ for feat, val in sorted_importance[:10]:
 top_features_for_api = {feat: round(val * 100 / sorted_importance[0][1], 1)
                         for feat, val in sorted_importance[:10]}
 
-# =============================================================================
-# CELL 12 — Save Artifacts
-# =============================================================================
 print("\n[12] Saving model artifacts...")
 
 MODEL_PATH = os.path.join(BASE_DIR, "ensemble_model.pkl")
